@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h1 class="title">
+  Hey there 👋
+</h1>
+
+<p>
+  I'm <a href="https://www.linkedin.com/in/xy2/">Hugo Elhaj-Lahsen</a>, a
+  software engineer in France. Looking for a Rust job.
+
+  Email me at <code>hugo[at]xy2.dev</code>.
+</p>
+
+<p>Click <a href="{{ get_url(path='@/blog/_index.md') }}">here</a> to see my posts.</p>
+{% endblock content %}

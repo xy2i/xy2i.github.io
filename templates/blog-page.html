@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+
+{% block head %}
+<link rel="stylesheet" type="text/css" href="/post.css" />
+{% endblock head %}
+
+{% block title %}
+{{ page.title }} | xy2
+{% endblock title %}
+
+{% block content %}
+<h1 class="title">
+  {{ page.title }}
+</h1>
+<p class="subtitle">Last updated <strong>{{ page.date }}</strong></p>
+
+{{ page.content | safe }}
+
+{% endblock content %}
