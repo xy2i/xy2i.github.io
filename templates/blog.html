@@ -5,9 +5,11 @@
   {{ section.title }}
 </h1>
 <ul>
-  <!-- If you are using pagination, section.pages will be empty. You need to use the paginator object -->  
+  <!-- If you are using pagination, section.pages will be empty. You need to use the paginator object -->
   {% for page in section.pages %}
+  {% if page.review == false %}
   <li><a href="{{ page.permalink | safe }}">{{ page.title }}</a></li>
+  {% endif %}
   {% endfor %}
 </ul>
 {% endblock content %}
