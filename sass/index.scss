@@ -1,40 +1,84 @@
 :root {
     --text-color: #444;
-    --bg-color: #fff;
+    --text-color-faded: rgb(110, 110, 110);
+    --bg-color: rgb(235, 235, 235);
     --code-color: #777;
     --code-bg-color: #f6f7f6;
+    --accent-color: #F2AA4CFF;
+    --secondary-color: #101820FF;
 }
 
 @media (prefers-color-scheme: dark) {
     :root {
         --text-color: #c9d1d9;
+        --text-color-faded: #a2a9b1;
         --bg-color: #0d1117;
         --code-color: #c5c8c6;
         --code-bg-color: #1d1f21;
+        --accent-color: #F2AA4CFF;
+        --secondary-color: #101820FF;
     }
 }
 
 html {
     font-size: 16px;
     line-height: 1.5;
-}
-
-body {
-    max-width: 40rem;
-    margin: 40px auto;
-    padding: 0 10px;
     font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
     color: var(--text-color);
     background-color: var(--bg-color);
 }
 
-a {
-    font-variation-settings: "wght" 300, "slnt" 0;
-    transition: font-variation-settings 0.3s ease;
+body {
+    margin: 0;
+    padding: 0;
 }
 
-a:hover {
-    font-variation-settings: "wght" 700, "slnt" -40;
+.container {
+    max-width: 40rem;
+    margin: 0 auto;
+    padding: 0 10px;
+}
+
+.header {
+    font-size: 1.5rem;
+    font-weight: 200;
+}
+
+.navbar {
+    border-bottom: 1px solid var(--secondary-color);
+    color: var(--accent-color);
+    background-color: var(--secondary-color);
+
+    .links {
+        padding: 0 0.5rem;
+        max-width: 40rem;
+        margin: 0 auto;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+
+        a {
+            font-size: 1rem;
+            letter-spacing: -0.075em;
+            color: var(--accent-color);
+        }
+
+        a.header {
+            font-variation-settings: "wght" 500, "slnt" -10;
+            letter-spacing: -0.15em;
+
+        }
+
+
+        a {
+            font-variation-settings: "wght" 300, "slnt" 0;
+            transition: font-variation-settings 0.3s ease;
+        }
+
+        a:hover {
+            font-variation-settings: "wght" 700, "slnt" -40;
+        }
+    }
 }
 
 a:link {
@@ -53,29 +97,53 @@ a:active {
     text-decoration: none;
 }
 
-// Animation
-a {
-    display: inline-block;
-    position: relative;
-    color: #0087ca;
-}
+.container {
+    a {
+        font-variation-settings: "wght" 300, "slnt" 0;
+        transition: font-variation-settings 0.3s ease;
+    }
 
-a::after {
-    content: '';
-    position: absolute;
-    width: 100%;
-    transform: scaleX(0);
-    height: 1px;
-    bottom: 0;
-    left: 0;
-    background-color: #0087ca;
-    transform-origin: bottom right;
-    transition: transform 0.125s ease-out;
-}
+    a:hover {
+        font-variation-settings: "wght" 700, "slnt" -40;
+    }
 
-a:hover::after {
-    transform: scaleX(1);
-    transform-origin: bottom left;
+    // Animation
+    a {
+        display: inline-block;
+        position: relative;
+    }
+
+    a::after {
+        content: '';
+        position: absolute;
+        width: 100%;
+        transform: scaleX(0);
+        height: 1px;
+        bottom: 0;
+        left: 0;
+        background-color: #58a6ff;
+        transform-origin: bottom right;
+        transition: transform 0.125s ease-out;
+    }
+
+    a:hover::after {
+        transform: scaleX(1);
+        transform-origin: bottom left;
+    }
+
+    a:visited::after {
+        background-color: #8e96f0;
+    }
+
+    @media (prefers-color-scheme: dark) {
+        a:link {
+            color: #58a6ff
+        }
+
+        a:visited {
+            color: #8e96f0
+        }
+    }
 }
 
 h1 {
@@ -98,15 +166,6 @@ h3 {
 }
 
 
-@media (prefers-color-scheme: dark) {
-    a:link {
-        color: #58a6ff
-    }
-
-    a:visited {
-        color: #8e96f0
-    }
-}
 
 @font-face {
     font-family: "Inter";
@@ -119,11 +178,4 @@ h3 {
     font-weight: 400;
     src: url(/font/jetbrains-mono-400.woff2) format('woff2');
     unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
-}
-
-
-.header {
-    font-size: 1.5rem;
-    line-height: 0.5;
-    font-weight: 200;
 }
