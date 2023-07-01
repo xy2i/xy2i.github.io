@@ -44,6 +44,11 @@ body {
     font-weight: 200;
 }
 
+dfn {
+    font-style: normal;
+    border-bottom: dotted 1px grey;
+}
+
 .navbar {
     border-bottom: 1px solid var(--secondary-color);
     color: var(--accent-color);
