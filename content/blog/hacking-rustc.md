@@ -1,6 +1,6 @@
 +++
 title = "Rust compiler-as-a-library"
-date = 2022-06-30
+date = 2022-07-01
 +++
 
 What if you could extend Rust with your own lints, compiler errors, custom
