@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" type="text/css" href="/index.css" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <script async src="https://umami2-ousf8ca4k-xy2iii.vercel.app/script.js"
+    data-website-id="6081a52c-118f-4952-869a-c527b16b2c4e"></script>
+  
+<link rel="stylesheet" type="text/css" href="/post.css" />
+
+  <title>
+Rust compiler-as-a-library | xy2
+</title>
+</head>
+
+<body>
+  <div class="navbar">
+    <div class="links">
+      <a class="header" href="/">xy2.dev</a>
+      <a href="/blog">posts</a>
+    </div>
+  </div>
+  <section class="section">
+    <div class="container">
+      
+<h1 class="title">
+  Rust compiler-as-a-library
+</h1>
+<p class="subtitle"><span>2022-07-01</span></p>
+
+<p>What if you could extend Rust with your own lints, compiler errors, custom
+standard library and semantics?</p>
+<p>For example, using <a href="https://www.memorysafety.org/blog/gary-guo-klint-rust-tools/">annotations in the Linux kernel</a> to determine atomic
+context violations, or writing <a href="https://github.com/tcdi/plrust/tree/main/plrustc">Postgres functions</a> in Rust.</p>
+<p>Well, what if I told you <code>rustc</code>, the Rust compiler, is a library, and you can
+do that without forking the compiler?</p>
+<p>In this post, we'll go compare them
+to their C/C++ version, why you would use or not use them and how they work
+at a high level.</p>
+<h1 id="from-compiler-plugin-to-compiler-driver">From compiler plugin to compiler driver</h1>
+<p>Both <a href="https://clang.llvm.org/doxygen/group__CINDEX.html">Clang</a> and <a href="https://gcc.gnu.org/wiki/plugins">GCC</a> have their own version of what they call &quot;compiler
+plugins&quot;. These let you write code that extend the compiler, and are nice
+because you don't have to change compiler code.</p>
+<p>Rust's approach is a bit different.</p>
+<p>Rust provides the entire compiler API to developers. Everything is public, so
+you can use <a href="https://doc.rust-lang.org/nightly/nightly-rustc/">all the compiler crates</a> freely, as a library. Your
+program becomes a wrapper over the Rust compiler.</p>
+<p>One use for this are <em>tools</em> that you can run over a Rust codebase:</p>
+<ul>
+<li><a href="https://github.com/rust-lang/rust-clippy">Clippy</a> (and the lesser known <a href="https://github.com/trailofbits/dylint">Dylint</a>) wrap the compiler to add lints.</li>
+<li><a href="https://github.com/rust-lang/miri">Miri</a> runs against Rust's control graph and detects <a href="https://en.wikipedia.org/wiki/Undefined_behavior">undefined behavior</a>.</li>
+<li><a href="https://michael-f-bryan.github.io/cargo-metrics/introduction.html">cargo-doc-coverage</a> gives the amount of documented items in a crate.</li>
+</ul>
+<p>A more niche use is for Rust compiler authors to prototype quickly against the
+Rust codebase without having to maintain a separate branch or fork: for example,
+<a href="https://github.com/rust-lang/polonius">Polonius</a> implements a next generation borrow checker, the part of Rust that
+checks lifetimes.</p>
+<p>Finally, these can be also used as custom compilers for a specific project,
+replacing <code>rustc</code> and adding extra analysis or behavior. For example, <code>klint</code> in
+Rust for Linux tracks <a href="https://lwn.net/Articles/831678/">preemption count</a> at compile time, by reading the <a href="https://en.wikipedia.org/wiki/Control-flow_graph">CFG</a>,
+and erroring otherwise (check out their full <a href="https://www.memorysafety.org/blog/gary-guo-klint-rust-tools/">blog post</a>!):</p>
+<pre data-lang="rust" style="background-color:#282c34;color:#dcdfe4;" class="language-rust "><code class="language-rust" data-lang="rust"><span>error: this call expects the preemption count to be </span><span style="color:#e5c07b;">0
+</span><span>  </span><span style="color:#c678dd;">-</span><span>-&gt; samples</span><span style="color:#c678dd;">/</span><span>rust</span><span style="color:#c678dd;">/</span><span>rust_sync.rs:</span><span style="color:#e5c07b;">76</span><span>:</span><span style="color:#e5c07b;">17
+</span><span>   </span><span style="color:#c678dd;">|
+</span><span style="color:#e5c07b;">76 </span><span style="color:#c678dd;">|  </span><span>kernel::delay::coarse_sleep(core::time::Duration::from_secs(</span><span style="color:#e5c07b;">1</span><span>));
+</span><span>   |  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+</span><span>   </span><span style="color:#c678dd;">|
+</span><span>   </span><span style="color:#c678dd;">=</span><span> note: but the possible preemption count at this point is </span><span style="color:#e5c07b;">1
+</span></code></pre>
+<h1 id="benefits-and-drawbacks">Benefits and drawbacks</h1>
+<p>The main drawback is that nothing is stable. Apart from the
+<code>rustc-driver</code> and associated APIs, any internal APIs you depend on may break
+between compiler updates.</p>
+<p>Of course, maintaining a compiler driver also has significant complexity, not
+only for implementers but
+especially if you want to keep it up to date.</p>
+<p>If you don't have esoteric needs or you don't fit one or the above use cases,
+see if <a href="https://doc.rust-lang.org/reference/procedural-macros.html">proc macros</a> can solve them.</p>
+<h1 id="cool-how-do-i-make-one">Cool, how do I make one?</h1>
+<p>Because drivers are forever unstable, any code I give here is likely to be
+outdated in a year's time. Instead I'll stick to high level recommendations.</p>
+<p><strong>To learn how the whole system works</strong>, check out the <a href="https://www.youtube.com/watch?v=SKmd5A-1cSE">Peeking at
+compiler-internal data</a> talk (<a href="https://hackmd.io/RiztubvfT4eOk4-4nM8Y7Q?both">slides here</a>).</p>
+<p><strong>For reference</strong>, check out the <a href="https://rustc-dev-guide.rust-lang.org/">rustc dev guide</a>, the official Rust
+compiler doc. In particuliar the sections on <a href="https://rustc-dev-guide.rust-lang.org/rustc-driver.html">rustc-driver</a> and
+<a href="https://rustc-dev-guide.rust-lang.org/query.html">queries</a> are of great interest.</p>
+<p><strong>For reference implementations</strong>, the highest quality one is probably
+<a href="https://github.com/tcdi/plrust/tree/main/plrustc">plrustc</a>. Of note is their <a href="https://github.com/tcdi/plrust/blob/main/plrustc/build.sh">build script</a> which outputs a statically linked
+<code>rustc</code> without dependencies. Make sure to <a href="https://github.com/tcdi/plrust/blob/main/plrustc/.cargo/config.toml">use <code>RUSTC_BOOTSTRAP</code></a> in your
+<code>.cargo/config</code> so your driver <a href="https://github.com/tcdi/plrust/blob/main/plrustc/rust-toolchain.toml">can depend on stable versions</a>.</p>
+<h1 id="summary">Summary</h1>
+<p>Rust's compiler-as-a-library approach offers you the ability to extend the Rust
+compiler with custom lints, compiler errors, and even create custom standard
+libraries and semantics.</p>
+<p>While there are benefits to this approach, like making special-purpose tools and
+custom compilers, it also comes with drawbacks, most notably the lack of
+stability and the need for ongoing maintenance to keep up with new Rust
+versions.</p>
+<p>But if you have specific needs, it opens up new possibilities for extending and customizing Rust.</p>
+
+
+
+    </div>
+  </section>
+</body>
+
+</html>

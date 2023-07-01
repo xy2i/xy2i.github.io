@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" type="text/css" href="/index.css" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <script async src="https://umami2-ousf8ca4k-xy2iii.vercel.app/script.js"
+    data-website-id="6081a52c-118f-4952-869a-c527b16b2c4e"></script>
+  
+<link rel="stylesheet" type="text/css" href="/post.css" />
+
+  <title>
+Practical Procedural Macros | xy2
+</title>
+</head>
+
+<body>
+  <div class="navbar">
+    <div class="links">
+      <a class="header" href="/">xy2.dev</a>
+      <a href="/blog">posts</a>
+    </div>
+  </div>
+  <section class="section">
+    <div class="container">
+      
+<h1 class="title">
+  Practical Procedural Macros
+</h1>
+<p class="subtitle"><span>2022-06-28</span></p>
+
+<blockquote>
+<p>Summary: An explaination of how to implement practical procedural macros in
+the <a href="https://www.rust-lang.org/">Rust</a> programming language. Explains the
+different types of macros, then shows an
+implementation of a procedural macro following best practices, focusing
+on testing and ergonomics.
+<em>Assumes some familiarity with Rust.</em></p>
+</blockquote>
+<p>In <a href="https://www.rust-lang.org/">Rust</a>, a <a href="https://doc.rust-lang.org/book/ch19-06-macros.html">macro</a> is code that writes other code, enabling
+<a href="https://en.wikipedia.org/wiki/Metaprogramming">metaprogramming</a>.</p>
+<p>Rust uses macros to add features on top of the core language, like
+the <a href="https://doc.rust-lang.org/std/macro.println.html"><code>println!()</code></a> macro, providing variadic arguments and string
+interpolation. They can also be used for code generation,
+removing the need for error-prone copy-and-paste programming. Macros are even
+powerful enough to create <a href="https://github.com/victorporof/rsx">domain-specific languages</a>, or <a href="https://github.com/launchbadge/sqlx">type-checked
+SQL at compile-time</a>.</p>
+<h1 id="when-should-you-use-or-not-use-procedural-macros">When should you use or not use procedural macros?</h1>
+<p>To be clear - <strong>most of the time, you don't need procedural macros</strong>.</p>
+<ul>
+<li>If you want to use a declarative macro in <code>#[my_macro]</code> or <code>#[derive(MyMacro)</code>
+position, then use the <a href="https://docs.rs/macro_rules_attribute/latest/macro_rules_attribute/"><code>macro_rules_attribute</code></a> library.</li>
+<li>If you need more complicated logic in your declarative macros, take a look at
+<a href="https://veykril.github.io/tlborm/introduction.html">The Little Book of Rust Macros</a> if you can use their techniques.</li>
+</ul>
+<p>Declarative macros, the classic form of macros, rely on purely declarative
+logic. They look something like this:</p>
+<pre data-lang="rust" style="background-color:#282c34;color:#dcdfe4;" class="language-rust "><code class="language-rust" data-lang="rust"><span style="color:#61afef;">macro_rules! </span><span>expr {
+</span><span>    (eval </span><span style="color:#e06c75;">$a</span><span>:</span><span style="color:#c678dd;">expr</span><span> + $b: expr) </span><span style="color:#c678dd;">=&gt; </span><span>{
+</span><span>        println!(</span><span style="color:#98c379;">&quot;</span><span style="color:#e5c07b;">{}</span><span style="color:#98c379;">&quot;</span><span>, </span><span style="color:#e06c75;">$a </span><span style="color:#c678dd;">+ </span><span style="color:#e06c75;">$b</span><span>);
+</span><span>    }
+</span><span>}
+</span><span>
+</span><span>expr!(eval </span><span style="color:#e5c07b;">1 </span><span style="color:#c678dd;">+ </span><span style="color:#e5c07b;">2</span><span>);
+</span><span style="color:#5c6370;">// evaluates to
+</span><span>println!(</span><span style="color:#98c379;">&quot;</span><span style="color:#e5c07b;">{}</span><span style="color:#98c379;">&quot;</span><span>, </span><span style="color:#e5c07b;">1 </span><span style="color:#c678dd;">+ </span><span style="color:#e5c07b;">2</span><span>);
+</span></code></pre>
+<p>They use their own separate, declarative language. But declarative macros are
+<a href="https://veykril.github.io/tlborm/decl-macros/minutiae.html">not without warts</a> and are pretty hard to understand if they get bigger and
+bigger.</p>
+<p>Rust introducted procedural macros in <a href="https://blog.rust-lang.org/2018/10/25/Rust-1.30.0.html">Rust
+1.30</a> for custom <code>#[attributes]</code>. Unlike declarative macros,
+proc macros use Rust directly, so you're writing the macros in the same
+language, which makes it much easier to scale. For this reason, you should
+consider proc macros if you need to deal with a large macro.</p>
+<p>But procedural macros have drawbacks. First, to do anything practical, you'll
+likely need the <a href="https://docs.rs/syn/latest/syn/"><code>syn</code></a> library, notorious for long build times. And second,
+there are still many footguns left in proc macros today. This guide will
+explain the ones I know of.</p>
+<p>Note that once you do invest into procedural macros, it's easier to write
+the next ones, because a fair bit of the cost is up-front.</p>
+<p>Overall, consider procedural macros if one of these applies:</p>
+<ul>
+<li>You need to develop a large, complex macro and are hitting declarative macro
+limitations.</li>
+<li>Your declarative macro has grown too large and hard to understand, and you
+need to extend it further.</li>
+<li>You need complex procedural logic in your macro.</li>
+</ul>
+<h1 id="a-short-primer">A short primer</h1>
+<p>There are <a href="https://doc.rust-lang.org/reference/procedural-macros.html">three different
+types</a> of
+procedural macros:</p>
+<ul>
+<li>function like: <code>my_macro!(...)</code></li>
+<li>derive macros: <code>#[derive(MyMacro)]</code></li>
+<li>attribute macros: <code>#[my_macro(arguments)]</code></li>
+</ul>
+<p>These types differ only by their syntax when invoked. Function-like, as their
+name suggests, act like your usual declarative macros.</p>
+<p>Derive macros can apply in any <code>#[derive(..)]</code> block. This makes them most
+interesting for macros that need to generate code on structs.</p>
+<p>Attributes macros are a more general version, which can be applied to any
+&quot;item&quot; in Rust: structs, traits, functions, types and so on. The
+<a href="https://docs.rs/tokio/latest/tokio/attr.main.html"><code>tokio::main</code></a> macro is a
+good example of why to use this kind of macro: it decorates a main function,
+without having to add an extra level of indentation. Compare with the function
+like syntax:</p>
+<pre data-lang="rust" style="background-color:#282c34;color:#dcdfe4;" class="language-rust "><code class="language-rust" data-lang="rust"><span>tokio_main! { </span><span style="color:#5c6370;">// extra indentation
+</span><span>    </span><span style="color:#c678dd;">fn </span><span style="color:#61afef;">main</span><span>() {
+</span><span>        println!(</span><span style="color:#98c379;">&quot;hello world&quot;</span><span>)
+</span><span>    }
+</span><span>}
+</span></code></pre>
+<p>The most important difference is procedural macros operate on tokens, not the
+AST directly, so the proc macro has to reimplement parsing of Rust source code.</p>
+<p>This is most often done with <a href="https://docs.rs/syn/latest/syn/"><code>syn</code></a>.</p>
+<p>Procedural macros are <em>compiler extensions</em>: they are currently run as part of
+the compiler. This is the main reason why they have to be declared in a
+<a href="https://stackoverflow.com/questions/56713877/why-do-proc-macros-have-to-be-defined-in-proc-macro-crate">separate
+crate</a>.</p>
+<p>Finally, proc macros are not fully hygienic (<a href="https://veykril.github.io/tlborm/proc-macros/hygiene.html">it's
+complicated</a>). Most
+importantly, like declarative macros, they are not path hygenic, so you need to
+use full paths, eg. <code>std::thread::spawn</code>, or include <code>use</code> statements if you
+can.</p>
+<p>Use <a href="https://github.com/dtolnay/cargo-expand"><code>cargo-expand</code></a> to manually test
+and see the output of a macro.</p>
+<h2 id="creating-a-proc-macro">Creating a proc macro</h2>
+<p>As we have to declare the proc macro in a separate crate, and assuming we have
+some code already, we'll need at least two crates: one for your proc macros and
+another one for the rest of your code.</p>
+<p>I recommend using a <a href="https://doc.rust-lang.org/book/ch14-03-cargo-workspaces.html">workspace</a> to organise this. Workspaces are an
+integrated way within Cargo to have multiple crates. If you use other systems
+to build your macro code, take a look at the proc macro Rust rules for <a href="http://bazelbuild.github.io/rules_rust/defs.html#rust_proc_macro">gn</a>
+or <a href="https://gn.googlesource.com/gn/+/main/docs/reference.md#func_rust_proc_macro">Bazel</a>.</p>
+<p>Here's an example with two crates, your library crate and the proc macro crate.
+You'll need to create the workspace layout yourself as there is no tool to do
+so automatically yet.</p>
+<pre style="background-color:#282c34;color:#dcdfe4;"><code><span>my_project/             // new folder
+</span><span>├─ my_crate/
+</span><span>│  ├─ Cargo.toml
+</span><span>│  ├─ lib.rs
+</span><span>├─ my_crate_proc_macro/ // macro crate (cargo new --lib my_crate_proc_macro)
+</span><span>│  ├─ Cargo.toml
+</span><span>│  ├─ lib.rs
+</span><span>├─ Cargo.toml           // new file
+</span></code></pre>
+<p>Now to declare the proc macro:</p>
+<pre data-lang="toml" style="background-color:#282c34;color:#dcdfe4;" class="language-toml "><code class="language-toml" data-lang="toml"><span style="color:#5c6370;"># my_crate_proc_macro/Cargo.toml
+</span><span>[lib]
+</span><span style="color:#e06c75;">proc-macro </span><span>= </span><span style="color:#e5c07b;">true
+</span></code></pre>
+<p>Add your newly declared proc macro crate as a dependency to your main crate's
+<code>Cargo.toml</code>, so it can use it:</p>
+<pre data-lang="toml" style="background-color:#282c34;color:#dcdfe4;" class="language-toml "><code class="language-toml" data-lang="toml"><span style="color:#5c6370;"># my_crate/Cargo.toml
+</span><span>[dependencies]
+</span><span style="color:#e06c75;">my_crate_proc_macro </span><span>= { </span><span style="color:#e06c75;">path </span><span>= </span><span style="color:#98c379;">&quot;../my_crate_proc_macro&quot; </span><span>}
+</span></code></pre>
+<p>Then add the workspace at the top level, above the two crates:</p>
+<pre data-lang="toml" style="background-color:#282c34;color:#dcdfe4;" class="language-toml "><code class="language-toml" data-lang="toml"><span style="color:#5c6370;"># Cargo.toml
+</span><span>[workspace]
+</span><span style="color:#e06c75;">members </span><span>= [
+</span><span>    </span><span style="color:#98c379;">&quot;my_crate&quot;</span><span>,
+</span><span>    </span><span style="color:#98c379;">&quot;my_crate_proc_macro&quot;</span><span>,
+</span><span>]
+</span></code></pre>
+<p>Here's an example of an function-like proc-macro. Add the <code>#[proc_macro]</code>
+attribute to a function in your proc macro crate to make it a proc macro.
+Each kind of proc macro has a different signature, but they all take and return
+<a href="https://doc.rust-lang.org/proc_macro/struct.TokenStream.html"><code>TokenStream</code></a>,
+a list of tokens.</p>
+<pre data-lang="rust" style="background-color:#282c34;color:#dcdfe4;" class="language-rust "><code class="language-rust" data-lang="rust"><span>#[</span><span style="color:#e06c75;">proc_macro</span><span>]
+</span><span style="color:#c678dd;">pub fn </span><span style="color:#61afef;">my_macro</span><span>(</span><span style="color:#e06c75;">item</span><span>: proc_macro::TokenStream) -&gt; proc_macro::TokenStream {
+</span><span>    item
+</span><span>}
+</span></code></pre>
+<h1 id="foundational-crates-for-best-practices-proc-macros">Foundational crates for best practices proc macros</h1>
+<p>It's possible to use proc macros without any dependencies, but using these
+will save you trouble and headaches over the long run.</p>
+<h2 id="testing-proc-macro2">Testing: <a href="https://docs.rs/proc-macro2/*/proc_macro2/"><code>proc_macro2</code></a></h2>
+<p>This crate is a wrapper around the <code>proc_macro</code> crate from the compiler, which
+you use to create a proc macro. However, <code>proc_macro</code> is not usable in
+non proc-macro contexts, meaning you can't use it in tests.</p>
+<p><code>proc_macro2</code> is a wrapper around the compiler crate. This means, most
+importantly for us, that you can use the proc macro in tests.</p>
+<p>Many other crates in the ecosystems have separate functions for <code>proc_macro</code>
+and <code>proc_macro2</code>, for example <a href="https://docs.rs/syn/latest/syn/parse/index.html"><code>syn::parse</code></a> vs <a href="https://docs.rs/syn/latest/syn/fn.parse2.html"><code>syn::parse2</code></a>.</p>
+<p>Here's an example of how <code>proc_macro2</code> can be useful. In this example,
+we separate the parts with
+<code>proc_macro</code> and <code>proc_macro2</code>, and test the <code>proc_macro2</code> parts. The actual
+proc macro does a roundtrip from <code>proc_macro2</code> structures and back. (Do not use
+the test in this example, see below.)</p>
+<pre data-lang="rust" style="background-color:#282c34;color:#dcdfe4;" class="language-rust "><code class="language-rust" data-lang="rust"><span>#[</span><span style="color:#e06c75;">proc_macro</span><span>]
+</span><span style="color:#c678dd;">pub fn </span><span style="color:#61afef;">my_macro</span><span>(</span><span style="color:#e06c75;">item</span><span>: proc_macro::TokenStream) -&gt; proc_macro::TokenStream {
+</span><span>    </span><span style="color:#61afef;">my_macro_impl</span><span>(item.</span><span style="color:#61afef;">into</span><span>()).</span><span style="color:#61afef;">into</span><span>()
+</span><span>}
+</span><span>
+</span><span style="color:#c678dd;">fn </span><span style="color:#61afef;">my_macro_impl</span><span>(</span><span style="color:#e06c75;">_item</span><span>: proc_macro2::TokenStream) -&gt; proc_macro2::TokenStream {
+</span><span>    </span><span style="color:#98c379;">&quot;fn macro_generated() -&gt; u32 {
+</span><span style="color:#98c379;">        42
+</span><span style="color:#98c379;">     }&quot;
+</span><span>    .</span><span style="color:#61afef;">parse</span><span>()
+</span><span>    .</span><span style="color:#61afef;">unwrap</span><span>()
+</span><span>}
+</span><span>
+</span><span>#[</span><span style="color:#e06c75;">cfg</span><span>(test)]
+</span><span style="color:#c678dd;">mod </span><span>tests {
+</span><span>    </span><span style="color:#c678dd;">use super</span><span>::</span><span style="color:#c678dd;">*</span><span>;
+</span><span>
+</span><span>    #[</span><span style="color:#e06c75;">test</span><span>]
+</span><span>    </span><span style="color:#c678dd;">fn </span><span style="color:#61afef;">unit</span><span>() {
+</span><span>        </span><span style="color:#5c6370;">// test for illustrative purposes
+</span><span>        </span><span style="color:#5c6370;">// do not use this test, see `quote` section below
+</span><span>        assert_eq!(
+</span><span>            </span><span style="color:#61afef;">my_macro_impl</span><span>(</span><span style="color:#98c379;">&quot;&quot;</span><span>.</span><span style="color:#61afef;">parse</span><span>().</span><span style="color:#61afef;">unwrap</span><span>()).</span><span style="color:#61afef;">to_string</span><span>(),
+</span><span>            </span><span style="color:#98c379;">&quot;fn macro_generated() -&gt; u32 { 42 }&quot;
+</span><span>        );
+</span><span>    }
+</span><span>}
+</span></code></pre>
+<h2 id="creating-trees-quote">Creating trees: <a href="https://docs.rs/quote/latest/quote/"><code>quote</code></a></h2>
+<p>In our test, we converted the <code>TokenStream</code>s to strings, because they don't
+implement <code>Eq</code>, so we can't compare them directly.</p>
+<p>Can you spot the error in the test?</p>
+<pre data-lang="rust" style="background-color:#282c34;color:#dcdfe4;" class="language-rust "><code class="language-rust" data-lang="rust"><span>assert_eq!(
+</span><span>    </span><span style="color:#61afef;">my_macro_impl</span><span>(</span><span style="color:#98c379;">&quot;&quot;</span><span>.</span><span style="color:#61afef;">parse</span><span>().</span><span style="color:#61afef;">unwrap</span><span>()).</span><span style="color:#61afef;">to_string</span><span>(),
+</span><span>    </span><span style="color:#98c379;">&quot;fn macro_generated() -&gt; u32 { 42 }&quot;
+</span><span>);
+</span></code></pre>
+<p>The proper result is actually <code>&quot;fn macro_generated () -&gt; u32 { 42 }&quot;</code>, with a
+space between <code>macro_generated</code> and the <code>()</code>.</p>
+<p>To test this macro, we used the string conversion of <code>TokenStream</code>, which just
+outputs each distinct token with a space between, stripping newlines.</p>
+<p>To avoid this, convert to and from a <code>TokenStream</code>:</p>
+<pre data-lang="rust" style="background-color:#282c34;color:#dcdfe4;" class="language-rust "><code class="language-rust" data-lang="rust"><span>assert_eq!(
+</span><span>    </span><span style="color:#61afef;">my_macro_impl</span><span>(</span><span style="color:#98c379;">&quot;&quot;</span><span>.</span><span style="color:#61afef;">parse</span><span>().</span><span style="color:#61afef;">unwrap</span><span>()).</span><span style="color:#61afef;">to_string</span><span>(),
+</span><span>    </span><span style="color:#98c379;">&quot;fn macro_generated() -&gt; u32 { 42 }&quot;</span><span>.parse::&lt;proc_macro2::TokenStream&gt;()
+</span><span>        .</span><span style="color:#61afef;">unwrap</span><span>().</span><span style="color:#61afef;">to_string</span><span>()
+</span><span>);
+</span></code></pre>
+<p>As you can see, this way is pretty error prone. At this point you'd likely make
+a helper.</p>
+<p>The confusion stems from our using strings as a way to
+represent Rust source code, because we must create the <code>TokenStream</code> by some
+method. Here, we confused a string with code written raw, but not
+converted, with one converted from a <code>TokenStream</code>.</p>
+<p>There's a more convenient way: the third-party <code>quote</code> crate, turning any code
+passed into a token tree directly. <code>quote</code> has a few niceties, including
+interpolation and repetition.</p>
+<p>Here's the previous example rewritten to use <code>quote</code>:</p>
+<pre data-lang="rust" style="background-color:#282c34;color:#dcdfe4;" class="language-rust "><code class="language-rust" data-lang="rust"><span style="color:#c678dd;">use </span><span>quote::quote;
+</span><span>
+</span><span>#[</span><span style="color:#e06c75;">proc_macro</span><span>]
+</span><span style="color:#c678dd;">pub fn </span><span style="color:#61afef;">my_macro</span><span>(</span><span style="color:#e06c75;">item</span><span>: proc_macro::TokenStream) -&gt; proc_macro::TokenStream {
+</span><span>    </span><span style="color:#61afef;">my_macro_impl</span><span>(item.</span><span style="color:#61afef;">into</span><span>()).</span><span style="color:#61afef;">into</span><span>()
+</span><span>}
+</span><span>
+</span><span style="color:#c678dd;">fn </span><span style="color:#61afef;">my_macro_impl</span><span>(</span><span style="color:#e06c75;">_item</span><span>: proc_macro2::TokenStream) -&gt; proc_macro2::TokenStream {
+</span><span>    quote! {
+</span><span>        </span><span style="color:#c678dd;">fn </span><span style="color:#61afef;">macro_generated</span><span>() -&gt; </span><span style="color:#c678dd;">u32 </span><span>{
+</span><span>            </span><span style="color:#e5c07b;">42
+</span><span>        }
+</span><span>    }
+</span><span>}
+</span><span>
+</span><span>#[</span><span style="color:#e06c75;">cfg</span><span>(test)]
+</span><span style="color:#c678dd;">mod </span><span>tests {
+</span><span>    </span><span style="color:#c678dd;">use super</span><span>::</span><span style="color:#c678dd;">*</span><span>;
+</span><span>
+</span><span>    #[</span><span style="color:#e06c75;">test</span><span>]
+</span><span>    </span><span style="color:#c678dd;">fn </span><span style="color:#61afef;">unit</span><span>() {
+</span><span>        assert_eq!(
+</span><span>            </span><span style="color:#61afef;">my_macro_impl</span><span>(quote!(</span><span style="color:#98c379;">&quot;&quot;</span><span>)).</span><span style="color:#61afef;">to_string</span><span>(),
+</span><span>            quote! {
+</span><span>                </span><span style="color:#c678dd;">fn </span><span style="color:#61afef;">macro_generated</span><span>() -&gt; </span><span style="color:#c678dd;">u32 </span><span>{
+</span><span>                    </span><span style="color:#e5c07b;">42
+</span><span>                }
+</span><span>            }
+</span><span>            .</span><span style="color:#61afef;">to_string</span><span>()
+</span><span>        );
+</span><span>    }
+</span><span>}
+</span></code></pre>
+<p>We'll see more of the power of <code>quote</code> as we go. Overall, it's more
+a convenience than anything, though be careful when testing if you choose not
+to use it.</p>
+<h2 id="parsing-rust-syn">Parsing Rust: <a href="https://docs.rs/syn/2.0.22/syn/"><code>syn</code></a></h2>
+<p>What if our macro takes some Rust input, and we want to parse it? There are two
+choices.</p>
+<p>First, we can manually parse the subset of Rust we want. This is doable but
+especially tedious. If you choose to go this route, the best way to go is
+probably looking at macros not using <code>syn</code>, <a href="https://github.com/GuillaumeGomez/doc-comment/blob/master/src/lib.rs"><code>doc-comment</code>'s source
+code</a>
+could be a good starting point. You save out on the long compile times of
+<code>syn</code>.</p>
+<p>However, this is painful, and brittle in the face of new syntax, so you'll
+probably want to use <code>syn</code> if you're doing anything pretty complex.</p>
+<p>We've talked a lot about tokens so far, but not so much about <a href="https://en.wikipedia.org/wiki/Abstract_syntax_tree">syntax
+trees</a>
+. Put
+simply, abstract syntax trees are much easier to deal with than tokens, as they
+don't need to represent details in the real syntax, like the parentheses and
+brackets, as well as the actual symbols you type out in source code.</p>
+<p>Here's the abstract syntax tree for a simple <code>pub fn main() {}</code>:</p>
+<pre data-lang="rust" style="background-color:#282c34;color:#dcdfe4;" class="language-rust "><code class="language-rust" data-lang="rust"><span>Item::Fn {
+</span><span>    attrs: [],
+</span><span>    vis: Visibility::Public(
+</span><span>        Pub,
+</span><span>    ),
+</span><span>    sig: Signature {
+</span><span>        constness: None,
+</span><span>        asyncness: None,
+</span><span>        unsafety: None,
+</span><span>        abi: None,
+</span><span>        fn_token: Fn,
+</span><span>        ident: Ident {
+</span><span>            sym: main,
+</span><span>            span: </span><span style="color:#61afef;">bytes</span><span>(</span><span style="color:#e5c07b;">8</span><span style="color:#c678dd;">..</span><span style="color:#e5c07b;">12</span><span>),
+</span><span>        },
+</span><span>        generics: Generics {
+</span><span>            lt_token: None,
+</span><span>            params: [],
+</span><span>            gt_token: None,
+</span><span>            where_clause: None,
+</span><span>        },
+</span><span>        paren_token: Paren,
+</span><span>        inputs: [],
+</span><span>        variadic: None,
+</span><span>        output: ReturnType::Default,
+</span><span>    },
+</span><span>    block: Block {
+</span><span>        brace_token: Brace,
+</span><span>        stmts: [],
+</span><span>    },
+</span><span>}
+</span></code></pre>
+<p>Of course, <code>syn</code> can parse any Rust syntax, not just functions.</p>
+<p>I recommend using the <a href="https://astexplorer.net/">AST Explorer</a> and putting Rust
+code in. This is an easy way to see what data is available on an <code>syn</code> AST.</p>
+<p>Here's an example that reverses the name of the function.
+For this example, we're using an attribute macro. It takes an extra
+argument (the <code>arguments</code> in <code>#[my_macro(arguments)]</code>).</p>
+<pre data-lang="rust" style="background-color:#282c34;color:#dcdfe4;" class="language-rust "><code class="language-rust" data-lang="rust"><span style="color:#c678dd;">use </span><span>quote::quote;
+</span><span>
+</span><span>#[</span><span style="color:#e06c75;">proc_macro_attribute</span><span>]
+</span><span style="color:#c678dd;">pub fn </span><span style="color:#61afef;">my_macro</span><span>(
+</span><span>    </span><span style="color:#e06c75;">_attr</span><span>: proc_macro::TokenStream,
+</span><span>    </span><span style="color:#e06c75;">item</span><span>: proc_macro::TokenStream,
+</span><span>) -&gt; proc_macro::TokenStream {
+</span><span>    </span><span style="color:#61afef;">my_macro_impl</span><span>(_attr.</span><span style="color:#61afef;">into</span><span>(), item.</span><span style="color:#61afef;">into</span><span>()).</span><span style="color:#61afef;">into</span><span>()
+</span><span>}
+</span><span>
+</span><span style="color:#c678dd;">fn </span><span style="color:#61afef;">my_macro_impl</span><span>(
+</span><span>    </span><span style="color:#e06c75;">_attr</span><span>: proc_macro2::TokenStream,
+</span><span>    </span><span style="color:#e06c75;">item</span><span>: proc_macro2::TokenStream,
+</span><span>) -&gt; proc_macro2::TokenStream {
+</span><span>    </span><span style="color:#c678dd;">let mut</span><span> func: syn::ItemFn </span><span style="color:#c678dd;">= match </span><span>syn::parse2(item.</span><span style="color:#61afef;">clone</span><span>()) {
+</span><span>        Ok(it) </span><span style="color:#c678dd;">=&gt;</span><span> it,
+</span><span>        Err(e) </span><span style="color:#c678dd;">=&gt; return</span><span> e.</span><span style="color:#61afef;">into_compile_error</span><span>(),
+</span><span>    };
+</span><span>
+</span><span>    </span><span style="color:#c678dd;">let</span><span> ident </span><span style="color:#c678dd;">=</span><span> func.sig.ident;
+</span><span>    </span><span style="color:#c678dd;">let</span><span> reversed: String </span><span style="color:#c678dd;">=</span><span> ident.</span><span style="color:#61afef;">to_string</span><span>().</span><span style="color:#61afef;">chars</span><span>().</span><span style="color:#61afef;">rev</span><span>().</span><span style="color:#61afef;">collect</span><span>();
+</span><span>    func.sig.ident </span><span style="color:#c678dd;">= </span><span>syn::Ident::new(</span><span style="color:#c678dd;">&amp;</span><span>reversed, ident.</span><span style="color:#61afef;">span</span><span>());
+</span><span>
+</span><span>    quote! { </span><span style="color:#c678dd;">#</span><span>func }
+</span><span>}
+</span><span>
+</span><span>#[</span><span style="color:#e06c75;">cfg</span><span>(test)]
+</span><span style="color:#c678dd;">mod </span><span>tests {
+</span><span>    </span><span style="color:#c678dd;">use super</span><span>::</span><span style="color:#c678dd;">*</span><span>;
+</span><span>
+</span><span>    #[</span><span style="color:#e06c75;">test</span><span>]
+</span><span>    </span><span style="color:#c678dd;">fn </span><span style="color:#61afef;">unit</span><span>() {
+</span><span>        assert_eq!(
+</span><span>            </span><span style="color:#61afef;">my_macro_impl</span><span>(
+</span><span>                quote!(</span><span style="color:#98c379;">&quot;&quot;</span><span>),
+</span><span>                quote! {
+</span><span>                    </span><span style="color:#c678dd;">fn </span><span style="color:#61afef;">my_function</span><span>(</span><span style="color:#e06c75;">a</span><span>: </span><span style="color:#c678dd;">u32</span><span>) {}
+</span><span>                }
+</span><span>            )
+</span><span>            .</span><span style="color:#61afef;">to_string</span><span>(),
+</span><span>            quote! {
+</span><span>                </span><span style="color:#c678dd;">fn </span><span style="color:#61afef;">noitcnuf_ym</span><span>(</span><span style="color:#e06c75;">a</span><span>: </span><span style="color:#c678dd;">u32</span><span>) {}
+</span><span>            }
+</span><span>            .</span><span style="color:#61afef;">to_string</span><span>()
+</span><span>        );
+</span><span>    }
+</span><span>}
+</span></code></pre>
+<p>We use <a href="https://docs.rs/syn/latest/syn/fn.parse2.html"><code>syn::parse2</code></a> to parse
+into the type on the left, here an <a href="https://docs.rs/syn/latest/syn/struct.ItemFn.html"><code>ItemFn</code></a>
+which is a function.</p>
+<p>As an aside,
+because the macro may be applied to something else than a function, eg. in
+front on a struct, we might not be able to parse a function. In this case we
+bail and return the error.</p>
+<p>The naive way to do this would be to panic, but this gives subpar error
+messages (<code>proc macro panicked</code>). So it would be nice at least to reuse <code>syn</code>'s
+error.</p>
+<p>But we can't return an error in proc macros - only tokens. The
+main way around this is to return tokens containing <a href="https://doc.rust-lang.org/core/macro.compile_error.html"><code>core::compile_error</code></a>
+from the Rust standard library.</p>
+<p>When that compile error is evaluated, it will return a nice compiler error for
+the user. There's a convenient
+<a href="https://docs.rs/syn/latest/syn/struct.Error.html#method.into_compile_error"><code>into_compile_error()</code></a>
+in <code>syn</code> to do this.</p>
+<h2 id="testing-compiler-errors-trybuild">Testing compiler errors: <a href="https://github.com/dtolnay/trybuild"><code>trybuild</code></a></h2>
+<p>We've talked a bit about errors. It would be nice to solidfy this in our
+tests: let's test our errors.</p>
+<p>Problem: an error message isn't just a message, so testing macro expansions
+like we did before is missing a bit of the picture. Here's what a parse error
+looks like for our macro currently, when we try to apply it, for example, to a
+struct:</p>
+<pre style="background-color:#282c34;color:#dcdfe4;"><code><span>error: expected `fn`
+</span><span> --&gt; src/main.rs:3:1
+</span><span>  |
+</span><span>3 | struct A;
+</span><span>  | ^^^^^^
+</span></code></pre>
+<p>We have the error message, generated by <code>syn</code> with <code>into_compile_error</code>:
+<code>expected `fn`.</code> But that's not all. Under the error is the code it applies
+to highlighted.</p>
+<p>This is why strings aren't enough for macros. On top of the code, Rust includes
+a <a href="https://docs.rs/proc-macro2/latest/proc_macro2/struct.Span.html"><code>Span</code></a>,
+that describes where the token was in the original code. (Spans are also used
+for <a href="https://veykril.github.io/tlborm/proc-macros/hygiene.html">macro hygiene
+purposes</a>, mainly
+relevant for identifiers.)</p>
+<p>Okay, so how do we test compiler errors? I recommend using
+<a href="https://crates.io/crates/trybuild"><code>trybuild</code></a>. Let's try it out with our
+error output from above put in <code>tests/struct.stderr</code>:</p>
+<pre data-lang="rust" style="background-color:#282c34;color:#dcdfe4;" class="language-rust "><code class="language-rust" data-lang="rust"><span style="color:#5c6370;">// tests/struct.rs
+</span><span style="color:#c678dd;">use </span><span>my_crate_proc_macro::my_macro;
+</span><span>#[</span><span style="color:#e06c75;">my_macro</span><span>]
+</span><span style="color:#c678dd;">struct </span><span>A;
+</span></code></pre>
+<pre data-lang="rust" style="background-color:#282c34;color:#dcdfe4;" class="language-rust "><code class="language-rust" data-lang="rust"><span style="color:#c678dd;">mod </span><span>tests { </span><span style="color:#5c6370;">// ...
+</span><span>    #[</span><span style="color:#e06c75;">test</span><span>]
+</span><span>    </span><span style="color:#c678dd;">fn </span><span style="color:#61afef;">compile_errors</span><span>() {
+</span><span>        </span><span style="color:#c678dd;">let</span><span> t </span><span style="color:#c678dd;">= </span><span>trybuild::TestCases::new();
+</span><span>        t.</span><span style="color:#61afef;">compile_fail</span><span>(</span><span style="color:#98c379;">&quot;tests/*.rs&quot;</span><span>);
+</span><span>    }
+</span><span>}
+</span></code></pre>
+<p>For each test that it finds, <code>trybuild</code> will compile it, check that it fails
+and compare the error output to the corresponding <code>.stderr</code> file. <code>trybuild</code>
+can generate these <code>.stderr</code> files for you as well.</p>
+<h1 id="summary">Summary</h1>
+<p>I hope this article has given you a good overview of procedural macros, as well
+as how to get started in a practical manner.</p>
+<p>Proc macros are (too?) complicated, and the lack of a fully integrated guide
+hurts their usability. The documention is there, just scattered around,
+and it's hard to get started.</p>
+<p>If you're looking for good
+practice, the best resource is likely the <a href="https://github.com/dtolnay/proc-macro-workshop">Proc Macro
+Workshop</a> made by David Tolnay,
+the author of many of the libraries listed here.</p>
+
+
+
+    </div>
+  </section>
+</body>
+
+</html>
